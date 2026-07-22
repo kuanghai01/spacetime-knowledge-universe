@@ -1,0 +1,21 @@
+# Render 部署配置
+# 文档: https://render.com/docs/blueprint-spec
+
+services:
+  # Web 服务 - FastAPI 后端
+  - type: web
+    name: spacetime-knowledge-universe
+    runtime: python
+    plan: free
+    buildCommand: pip install -r render-requirements.txt
+    startCommand: uvicorn render_main:app --host 0.0.0.0 --port 10000
+    healthCheckPath: /api/health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false  # 在 Render Dashboard 中设置
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: API_V1_PREFIX
+        value: /api/v1
+      - key: DEBUG
+        value: false

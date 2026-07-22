@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 环境变量
+.env
+.env.local
+
+# 测试
+.pytest_cache/
+htmlcov/
+.coverage
+
+# 文档（不推送到大仓库）
+docs/pages/
+docs/pages_small/
+docs/*.pdf
+
+# 临时文件
+*.log
+/tmp/

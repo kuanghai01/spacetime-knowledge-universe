@@ -1,0 +1,17 @@
+# Render 精简版依赖（无 PostgreSQL/Redis/Neo4j/Milvus）
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+
+# AI/LLM（可选，无 API key 时自动降级为演示模式）
+langchain>=0.1.0
+langchain-openai>=0.0.5
+openai>=1.10.0
+
+# WebSocket
+websockets>=12.0
+
+# 工具
+python-multipart>=0.0.6
+PyMuPDF>=1.23.0
+numpy>=1.26.0
