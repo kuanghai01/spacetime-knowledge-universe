@@ -435,7 +435,7 @@
         const expBadge = document.getElementById('expBadge');
         const suggestionsDiv = document.getElementById('suggestions');
 
-        let ws = null;
+        let sessionId = null;
         let currentSubject = 'history';
         let currentMode = 'guided';  // guided | free_qa | hybrid
         let sessionActive = false;
@@ -469,96 +469,34 @@
         // GitHub Pages + Render：同上，改为 Render 地址
         // 例如: const API_BASE = 'https://spacetime-universe-api.onrender.com';
 
-        // ===== 连接 WebSocket =====
-        function connectWS() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const host = API_BASE ? API_BASE.replace(/^https?:\/\//, '').replace(/\/$/, '') : window.location.host;
-            const wsUrl = `${protocol}//${host}/api/v1/learn/ws/${currentSubject}?user_id=${userId}`;
+        // ===== 配置 =====
+        // EdgeOne Pages + 腾讯云函数 SCF 部署：
+        // 改为你的 SCF API 网关地址
+        // 例如: const API_BASE = 'https://service-xxx.sh.apigw.tencentcs.com';
+        const API_BASE = '';
+        //
+        // 同域部署（后端和前端在同一域名）留空：
+        // const API_BASE = '';
 
-            debug('连接 WebSocket: ' + wsUrl);
-            ws = new WebSocket(wsUrl);
-
-            ws.onopen = () => {
-                debug('WebSocket 已连接');
-                statusDot.className = 'status-dot connected';
-                statusText.textContent = '已连接 - ' + getSubjectName(currentSubject);
-                sendBtn.disabled = false;
+        // ===== HTTP API 封装 =====
+        async function apiCall(method, path, body = null) {
+            const url = API_BASE + path;
+            const options = {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
             };
-
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                debug('收到消息: type=' + data.type);
-                handleMessage(data);
-            };
-
-            ws.onclose = () => {
-                statusDot.className = 'status-dot disconnected';
-                statusText.textContent = '已断开';
-                sendBtn.disabled = true;
-                sessionActive = false;
-                setTimeout(connectWS, 5000);
-            };
-
-            ws.onerror = () => {
-                statusDot.className = 'status-dot disconnected';
-                statusText.textContent = '连接错误';
-            };
-        }
-
-        // ===== 消息处理 =====
-        function handleMessage(data) {
-            switch (data.type) {
-                case 'session_started':
-                    sessionActive = true;
-                    debug('会话开始: ' + data.session_id + ' 模式: ' + data.mode);
-                    addAgentMessage(data.content || '会话已开始', currentSubject);
-                    break;
-
-                case 'question':
-                    currentQuestion = data;
-                    debug('收到题目: ' + data.question_id + ' 类型: ' + data.question_type);
-                    showQuestion(data);
-                    break;
-
-                case 'feedback':
-                    debug('收到反馈: correct=' + data.correct + ' score=' + data.score);
-                    showFeedback(data);
-                    currentQuestion = null;
-                    break;
-
-                case 'hint':
-                    addAgentMessage('💡 ' + data.content, currentSubject);
-                    break;
-
-                case 'free_answer':
-                    addAgentMessage(data.content, currentSubject, data.related_knowledge);
-                    if (data.exp_gained) showExpBadge(data.exp_gained);
-                    break;
-
-                case 'session_summary':
-                    showSessionSummary(data);
-                    sessionActive = false;
-                    break;
-
-                case 'system':
-                    addAgentMessage(data.content, currentSubject);
-                    break;
-
-                case 'task_suggest':
-                    addAgentMessage(`📋 **建议任务**: ${data.task.title}`, currentSubject);
-                    break;
-
-                case 'task_completed':
-                    addAgentMessage('🎉 任务完成！' + (data.exp_gained ? ` +${data.exp_gained} 经验` : ''), currentSubject);
-                    if (data.exp_gained) showExpBadge(data.exp_gained);
-                    break;
-
-                case 'error':
-                    addAgentMessage('⚠️ ' + data.content, currentSubject);
-                    break;
-
-                default:
-                    console.log('未知消息类型:', data);
+            if (body) options.body = JSON.stringify(body);
+            
+            debug('API ' + method + ' ' + path);
+            try {
+                const res = await fetch(url, options);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || '请求失败');
+                return data;
+            } catch (e) {
+                debug('API 错误: ' + e.message);
+                addAgentMessage('⚠️ 网络错误：' + e.message, currentSubject);
+                return null;
             }
         }
 
@@ -634,14 +572,17 @@
 
             // 下一题按钮
             html += '<div style="margin-top:12px;">';
-            html += '<button onclick="nextQuestion()" style="padding:8px 20px;border:none;border-radius:8px;background:#4a90d9;color:white;cursor:pointer;font-size:14px;">下一题 →</button>';
+            if (data.next_question) {
+                html += '<button onclick="nextQuestion()" style="padding:8px 20px;border:none;border-radius:8px;background:#4a90d9;color:white;cursor:pointer;font-size:14px;">下一题 →</button>';
+            } else {
+                html += '<span style="color:#2ecc71;font-size:14px;">🎉 本轮练习完成！</span>';
+            }
             html += '</div>';
 
             div.innerHTML = html;
             chatContainer.appendChild(div);
             scrollToBottom();
 
-            // 恢复输入框
             messageInput.placeholder = '输入你的问题或答案...';
         }
 
@@ -670,72 +611,113 @@
         }
 
         // ===== 提交答案 =====
-        function submitAnswer(answer) {
-            debug('提交答案: ' + answer + ' | sessionActive=' + sessionActive + ' | ws=' + (ws ? ws.readyState : 'null'));
-            if (!sessionActive || !ws || ws.readyState !== WebSocket.OPEN) {
-                debug('无法提交: 连接未就绪');
-                addAgentMessage('⚠️ 连接未就绪，请稍后再试', currentSubject);
+        async function submitAnswer(answer) {
+            debug('提交答案: ' + answer + ' | sessionActive=' + sessionActive);
+            if (!sessionActive || !sessionId) {
+                debug('无法提交: 会话未开始');
+                addAgentMessage('⚠️ 请先开始学习会话', currentSubject);
                 return;
             }
 
             // 显示用户答案
             addUserMessage(answer);
 
-            // 发送答案
-            ws.send(JSON.stringify({
-                type: 'answer',
-                content: answer,
-            }));
-            
             // 禁用输入防止重复提交
             messageInput.disabled = true;
             sendBtn.disabled = true;
-            setTimeout(() => {
-                messageInput.disabled = false;
-                sendBtn.disabled = false;
-                messageInput.focus();
-            }, 1000);
+
+            const data = await apiCall('POST', '/api/v1/learn/answer', {
+                session_id: sessionId,
+                answer: answer,
+            });
+
+            messageInput.disabled = false;
+            sendBtn.disabled = false;
+            messageInput.focus();
+
+            if (data) {
+                showFeedback(data);
+                if (data.next_question) {
+                    currentQuestion = data.next_question;
+                } else {
+                    currentQuestion = null;
+                }
+            }
         }
 
         // ===== 下一题 =====
-        function nextQuestion() {
-            if (!sessionActive || !ws || ws.readyState !== WebSocket.OPEN) return;
-            ws.send(JSON.stringify({ type: 'next_question' }));
+        async function nextQuestion() {
+            if (!sessionActive || !sessionId) return;
+            const data = await apiCall('POST', '/api/v1/learn/answer', {
+                session_id: sessionId,
+                answer: '', // 跳过当前题
+            });
+            if (data && data.next_question) {
+                showQuestion(data.next_question);
+                currentQuestion = data.next_question;
+            }
         }
 
         // ===== 请求提示 =====
-        function requestHint() {
-            if (!sessionActive || !ws || ws.readyState !== WebSocket.OPEN) return;
-            ws.send(JSON.stringify({ type: 'hint' }));
+        async function requestHint() {
+            if (!sessionActive || !sessionId) return;
+            const data = await apiCall('POST', '/api/v1/learn/hint', {
+                session_id: sessionId,
+            });
+            if (data && data.hint) {
+                addAgentMessage('💡 ' + data.hint, currentSubject);
+            }
         }
 
         // ===== 自由提问 =====
-        function askFreeQuestion(question) {
-            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        async function askFreeQuestion(question) {
             addUserMessage(question);
-            ws.send(JSON.stringify({
-                type: 'free_question',
-                content: question,
-            }));
+            const data = await apiCall('POST', '/api/v1/learn/free-question', {
+                user_id: userId,
+                subject_id: currentSubject,
+                message: question,
+            });
+            if (data) {
+                addAgentMessage(data.answer, currentSubject, data.knowledge_points);
+                if (data.exp_gained) showExpBadge(data.exp_gained);
+            }
         }
 
         // ===== 开始新会话 =====
-        function startNewSession() {
+        async function startNewSession() {
             debug('开始新会话: ' + currentMode);
-            if (!ws || ws.readyState !== WebSocket.OPEN) {
-                debug('无法开始会话: WebSocket未连接');
-                return;
-            }
-            ws.send(JSON.stringify({
-                type: 'start_session',
+            chatContainer.innerHTML = '';
+            sessionActive = false;
+            currentQuestion = null;
+
+            const data = await apiCall('POST', '/api/v1/learn/start-session', {
+                user_id: userId,
+                subject_id: currentSubject,
                 mode: currentMode,
-            }));
+            });
+
+            if (data) {
+                sessionId = data.session_id;
+                sessionActive = true;
+                addAgentMessage(data.welcome, currentSubject);
+                if (data.question) {
+                    currentQuestion = data.question;
+                    showQuestion(data.question);
+                }
+            }
         }
 
         // ===== 结束会话 =====
-        function endSession() {
-            if (!sessionActive || !ws || ws.readyState !== WebSocket.OPEN) return;
-            ws.send(JSON.stringify({ type: 'end_session' }));
+        async function endSession() {
+            if (!sessionActive || !sessionId) return;
+            const data = await apiCall('POST', '/api/v1/learn/end-session', {
+                session_id: sessionId,
+            });
+            if (data) {
+                showSessionSummary(data);
+                sessionActive = false;
+                sessionId = null;
+            }
         }
 
         // ===== 添加用户消息 =====
@@ -813,7 +795,7 @@
         function sendMessage() {
             const text = messageInput.value.trim();
             debug('发送消息: ' + text + ' | sessionActive=' + sessionActive + ' | currentQuestion=' + (currentQuestion ? currentQuestion.question_id : 'null'));
-            if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+            if (!text) return;
 
             if (sessionActive && currentQuestion) {
                 // 当前有题目等待回答
@@ -849,10 +831,12 @@
                 chatContainer.innerHTML = '';
                 sessionActive = false;
                 currentQuestion = null;
+                sessionId = null;
 
-                // 重新连接
-                if (ws) ws.close();
-                connectWS();
+                // 更新状态
+                statusDot.className = 'status-dot connected';
+                statusText.textContent = '已连接 - ' + getSubjectName(currentSubject);
+                sendBtn.disabled = false;
             });
         });
 
@@ -868,12 +852,8 @@
                 sessionActive = false;
                 currentQuestion = null;
 
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({
-                        type: 'start_session',
-                        mode: currentMode,
-                    }));
-                }
+                // 自动开始新会话
+                startNewSession();
             });
         });
 
@@ -881,7 +861,7 @@
         document.querySelectorAll('.suggestion-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const question = btn.dataset.question;
-                if (question && ws && ws.readyState === WebSocket.OPEN) {
+                if (question) {
                     if (sessionActive && currentMode !== 'free_qa') {
                         submitAnswer(question);
                     } else {
@@ -892,17 +872,14 @@
         });
 
         // ===== 启动 =====
-        connectWS();
+        statusDot.className = 'status-dot connected';
+        statusText.textContent = '已连接';
+        sendBtn.disabled = false;
 
-        // 自动开始引导学习（延迟等待连接）
+        // 自动开始引导学习
         setTimeout(() => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                    type: 'start_session',
-                    mode: currentMode,
-                }));
-            }
-        }, 1000);
+            startNewSession();
+        }, 500);
     </script>
 </body>
 </html>

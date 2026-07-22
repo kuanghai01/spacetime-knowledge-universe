@@ -1,0 +1,5 @@
+# 腾讯云函数 SCF 依赖（精简版）
+fastapi==0.115.0
+uvicorn==0.30.6
+pydantic==2.9.0
+pydantic-settings==2.5.0
